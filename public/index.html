@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Backend Systems Gym</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, system-ui, sans-serif;
+        background: #0b1020;
+        color: #e8ecf7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(145deg, #0b1020, #17203a);
+      }
+
+      main {
+        width: min(1000px, 92vw);
+        margin: 0 auto;
+        padding: 40px 0 64px;
+      }
+
+      h1,
+      h2 {
+        margin-top: 0;
+      }
+
+      .muted,
+      #status {
+        color: #a9b3cd;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 18px;
+      }
+
+      .card {
+        margin-top: 18px;
+        padding: 20px;
+        border: 1px solid #33405f;
+        border-radius: 14px;
+        background: rgba(17, 25, 47, 0.92);
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 220px;
+        resize: vertical;
+        padding: 14px;
+        border: 1px solid #435175;
+        border-radius: 10px;
+        background: #090e1c;
+        color: #f4f6fb;
+        font: inherit;
+      }
+
+      button {
+        margin-top: 12px;
+        padding: 10px 15px;
+        border: 0;
+        border-radius: 9px;
+        background: #7c9cff;
+        color: #071022;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+
+      pre {
+        white-space: pre-wrap;
+        line-height: 1.55;
+        font: inherit;
+      }
+
+      a {
+        color: #9fc0ff;
+      }
+
+      .history-button {
+        display: block;
+        width: 100%;
+        margin: 8px 0;
+        text-align: left;
+        background: #253455;
+        color: #eef3ff;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Backend Systems Gym</h1>
+      <p class="muted">
+        Generate a design challenge, propose an architecture, and receive a
+        grounded review with observable evidence.
+      </p>
+
+      <section class="card">
+        <button id="new-challenge" type="button">New Challenge</button>
+        <h2 id="challenge-title">Loading challenge...</h2>
+        <p id="challenge-prompt"></p>
+      </section>
+
+      <div class="grid">
+        <section class="card">
+          <h2>Your Design</h2>
+          <textarea
+            id="design"
+            placeholder="Describe components, data flow, failure handling, trade-offs, and observability."
+          ></textarea>
+          <button id="submit-design" type="button">Review My Design</button>
+          <p id="status" aria-live="polite"></p>
+        </section>
+
+        <section class="card">
+          <h2>Grounded Review</h2>
+          <pre id="review">Submit a design to begin.</pre>
+          <p id="metrics" class="muted"></p>
+          <h3>Sources</h3>
+          <ul id="sources"></ul>
+        </section>
+      </div>
+
+      <section class="card">
+        <h2>Recent Reviews</h2>
+        <div id="history" class="muted">No saved reviews yet.</div>
+      </section>
+    </main>
+
+    <script>
+      const newChallengeButton = document.querySelector("#new-challenge");
+      const submitButton = document.querySelector("#submit-design");
+      const challengeTitle = document.querySelector("#challenge-title");
+      const challengePrompt = document.querySelector("#challenge-prompt");
+      const designInput = document.querySelector("#design");
+      const statusText = document.querySelector("#status");
+      const reviewText = document.querySelector("#review");
+      const metricsText = document.querySelector("#metrics");
+      const sourcesList = document.querySelector("#sources");
+      const historyList = document.querySelector("#history");
+
+      let currentChallenge = "";
+
+      async function requestJson(url, options) {
+        const response = await fetch(url, options);
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "Request failed.");
+        return payload;
+      }
+
+      async function loadChallenge() {
+        const challenge = await requestJson("/api/challenge");
+        currentChallenge = challenge.prompt;
+        challengeTitle.textContent = challenge.title;
+        challengePrompt.textContent = challenge.prompt;
+        designInput.value = "";
+        reviewText.textContent = "Submit a design to begin.";
+        metricsText.textContent = "";
+        sourcesList.replaceChildren();
+      }
+
+      function renderRecord(record) {
+        reviewText.textContent = record.review;
+        metricsText.textContent = [
+          `Latency: ${record.metrics.latencyMs} ms`,
+          `Retrieval hits: ${record.metrics.retrievalHits}`,
+          `Citation coverage: ${record.metrics.citationCoverage}`,
+          `Request ID: ${record.metrics.requestId ?? "no model call"}`,
+        ].join(" | ");
+
+        sourcesList.replaceChildren();
+        if (record.sources.length === 0) {
+          const item = document.createElement("li");
+          item.textContent = "No matching source. The model was not called.";
+          sourcesList.append(item);
+          return;
+        }
+
+        for (const source of record.sources) {
+          const item = document.createElement("li");
+          const link = document.createElement("a");
+          link.href = source.url;
+          link.target = "_blank";
+          link.rel = "noreferrer";
+          link.textContent = `[${source.id}] ${source.title}`;
+          item.append(link);
+          sourcesList.append(item);
+        }
+      }
+
+      async function loadHistory() {
+        const records = await requestJson("/api/history");
+        historyList.replaceChildren();
+
+        if (records.length === 0) {
+          historyList.textContent = "No saved reviews yet.";
+          return;
+        }
+
+        for (const record of records) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "history-button";
+          button.textContent = `${new Date(record.createdAt).toLocaleString()} | ${record.challenge.slice(0, 90)}`;
+          button.addEventListener("click", () => renderRecord(record));
+          historyList.append(button);
+        }
+      }
+
+      newChallengeButton.addEventListener("click", async () => {
+        statusText.textContent = "";
+        try {
+          await loadChallenge();
+        } catch (error) {
+          statusText.textContent = error.message;
+        }
+      });
+
+      submitButton.addEventListener("click", async () => {
+        statusText.textContent = "Reviewing the design...";
+        submitButton.disabled = true;
+
+        try {
+          const record = await requestJson("/api/review", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              challenge: currentChallenge,
+              design: designInput.value,
+            }),
+          });
+          renderRecord(record);
+          await loadHistory();
+          statusText.textContent = "Review saved locally.";
+        } catch (error) {
+          statusText.textContent = error.message;
+        } finally {
+          submitButton.disabled = false;
+        }
+      });
+
+      Promise.all([loadChallenge(), loadHistory()]).catch((error) => {
+        statusText.textContent = error.message;
+      });
+    </script>
+  </body>
+</html>

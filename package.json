@@ -1,0 +1,11 @@
+{
+  "name": "backend-systems-gym",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "openai": "7.30.1"
+  }
+}
